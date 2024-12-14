@@ -25,7 +25,7 @@ class _FoodTileState extends State<FoodTile> {
     return Container(
         padding: EdgeInsets.all(18),
         decoration: BoxDecoration(
-            color: Colors.yellow,
+            color: Colors.green[400],
             borderRadius:BorderRadius.circular(12)
         ),
         child:Row(
@@ -33,7 +33,7 @@ class _FoodTileState extends State<FoodTile> {
             Icon(widget.iconName),
             const Spacer(),
             Text(
-              widget.foodName
+              widget.foodName,style: TextStyle(color: Colors.white,fontSize: 15),
             ),
             const Spacer(),
             Checkbox(
