@@ -1,10 +1,41 @@
+import 'dart:convert';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:foodgpt/pages/analyze_tile.dart';
 import 'package:lottie/lottie.dart';
+import 'package:http/http.dart' as http;
+
+class rules {
+  final List<String> consequents;
+  final List<String> antecedents;
+  final double support;
+  final double confidence;
+  final double lift;
+
+  rules(
+      {required this.consequents,
+      required this.antecedents,
+      required this.support,
+      required this.confidence,
+      required this.lift});
+
+  // Convert a map into a product object
+  factory rules.fromJson(Map<String, dynamic> json) {
+    return rules(
+      consequents: List<String>.from(json['consequents'] ?? []),
+      // Ensure we handle the list correctly
+      antecedents: List<String>.from(json['antecedents'] ?? []),
+      // Ensure we handle the list correctly
+      support: json['support'] ?? 0.0,
+      confidence: json['confidence'] ?? 0.0,
+      lift: json['lift'] ?? 0.0,
+    );
+  }
+}
 
 class AnalyzePage extends StatefulWidget {
-  final List antecedentsList;
+  final List<String> antecedentsList;
   final double confidenceValue;
   final double supportValue;
   final double liftValue;
@@ -22,45 +53,96 @@ class AnalyzePage extends StatefulWidget {
 }
 
 class _AnalyzePageState extends State<AnalyzePage> {
-  final List selectedProducts = [];
-  final List rules = [
-    ['1+2', '0.9', '0.8', '0.7'],
-    ['3+3', '0.9', '0.8', '0.6'],
-    ['4+4', '0.9', '0.8', '0.5'],
-    ['1+2', '0.9', '0.8', '0.7'],
-    ['3+3', '0.9', '0.8', '0.6'],
-    ['4+4', '0.9', '0.8', '0.5'],
-    ['1+2', '0.9', '0.8', '0.7'],
-    ['3+3', '0.9', '0.8', '0.6'],
-    ['4+4', '0.9', '0.8', '0.5'],
-    ['1+2', '0.9', '0.8', '0.7'],
-    ['3+3', '0.9', '0.8', '0.6'],
-    ['4+4', '0.9', '0.8', '0.5'],
-    ['1+2', '0.9', '0.8', '0.7'],
-    ['3+3', '0.9', '0.8', '0.6'],
-    ['4+4', '0.9', '0.8', '0.5']
-  ];
+  late List<rules> rulesList;
 
+  String selectedMetric = '';
+  double threshold = 0;
   bool isLoading = true; // Start with the loading state
+  void determineMetric() {
+    if (widget.confidenceValue != 0.8) {
+      selectedMetric = 'confidence';
+      threshold = widget.confidenceValue;
+    } else if (widget.supportValue != 0.7) {
+      selectedMetric = 'support';
+      threshold = widget.supportValue;
+    } else if (widget.liftValue != 0.9) {
+      selectedMetric = 'lift';
+      threshold = widget.liftValue;
+    } else {
+      selectedMetric = 'confidence';
+      threshold = widget.confidenceValue;
+    }
+  }
 
-  void getNames(List foodList) {
-    for (int i = 0; i < foodList.length; i++) {
-      if (foodList[i][1]) {
-        selectedProducts.add(foodList[i][0]);
+  Future<List<rules>> fetchRules() async {
+    Map<String, dynamic> payload = {
+      "products": widget.antecedentsList,
+      "metric": selectedMetric,
+      "threshold": "$threshold",
+    };
+
+    print('Payload: $payload');
+    print(json.encode(payload));
+
+    try {
+      final response = await http
+          .post(
+            Uri.parse('https://d0d5-154-121-46-88.ngrok-free.app/rules'),
+            // Ensure this is the correct endpoint
+            headers: {'Content-Type': 'application/json; charset=UTF-8'},
+            body: jsonEncode(payload),
+          )
+          .timeout(Duration(seconds: 10)); // Timeout after 10 seconds
+
+      print('Response Code: ${response.statusCode}');
+      print('Response Body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+
+        if (data.containsKey('rules') && data['rules'] is List) {
+          List<dynamic> rulesJson = data['rules'];
+          return rulesJson
+              .map((json) => rules.fromJson(json as Map<String, dynamic>))
+              .toList();
+        } else {
+          throw Exception('Invalid response format: ${data}');
+        }
+      } else {
+        throw Exception(
+            'API returned status ${response.statusCode}: ${response.body}');
       }
+    } catch (e) {
+      print('Error fetching rules: $e');
+      return Future.error('Failed to fetch rules: $e');
     }
   }
 
   @override
   void initState() {
     super.initState();
-    getNames(widget.antecedentsList);
-    // Simulate loading with a delay (for example, 2 seconds)
-    Future.delayed(Duration(seconds: 2), () {
-      setState(() {
-        isLoading = false; // After 2 seconds, stop the loading animation
-      });
+    rulesList=[];
+    // Call the initialization logic in a separate method
+    initializeData();
+  }
+
+// New method to handle async operations
+  Future<void> initializeData() async {
+    setState(() {
+      isLoading = true; // Start loading
     });
+
+    try {
+      determineMetric(); // Determine the metric
+      rulesList=await fetchRules(); // Fetch rules asynchronously
+    } catch (e) {
+      print('Error initializing data: $e');
+      // Handle errors if necessary, e.g., show an alert or a snackbar
+    } finally {
+      setState(() {
+        isLoading = false; // Stop loading
+      });
+    }
   }
 
   // Custom method to show a bottom sheet with scrollable content
@@ -73,9 +155,12 @@ class _AnalyzePageState extends State<AnalyzePage> {
       ),
       builder: (BuildContext context) {
         return DraggableScrollableSheet(
-          initialChildSize: 0.5, // Initial size of the sheet
-          minChildSize: 0.25, // Minimum size when dragged down
-          maxChildSize: 0.9, // Maximum size when expanded
+          initialChildSize: 0.5,
+          // Initial size of the sheet
+          minChildSize: 0.25,
+          // Minimum size when dragged down
+          maxChildSize: 0.9,
+          // Maximum size when expanded
           expand: false,
           builder: (context, scrollController) {
             return Container(
@@ -98,10 +183,11 @@ class _AnalyzePageState extends State<AnalyzePage> {
                   Expanded(
                     child: ListView.builder(
                       controller: scrollController,
-                      itemCount: selectedProducts.length, // Example number of items
+                      itemCount: widget.antecedentsList.length,
+                      // Example number of items
                       itemBuilder: (context, index) {
                         return ListTile(
-                          title: Text('${selectedProducts[index]}'),
+                          title: Text('${widget.antecedentsList[index]}'),
                           onTap: () {
                             // Handle item selection
                             Navigator.pop(context);
@@ -125,42 +211,50 @@ class _AnalyzePageState extends State<AnalyzePage> {
       appBar: AppBar(
         leading: IconButton(
             onPressed: () => {
-              Navigator.pushNamed(context,'/homepage'),
-            },
+                  Navigator.pushNamed(context, '/homepage'),
+                },
             icon: Icon(Icons.arrow_back)),
         title: Text("Generated Rules Page"),
       ),
       body: isLoading
-          ? Center(child:Column(children: [Lottie.asset('assets/lottie/loading_animation.json'),Text("Please wait, Loading ...",style: TextStyle(color: Colors.black,fontSize: 24),)])) // Show loading animation
+          ? Center(
+              child: Column(children: [
+              Lottie.asset('assets/lottie/loading_animation.json'),
+              Text(
+                "Please wait, Loading ...",
+                style: TextStyle(color: Colors.black, fontSize: 24),
+              )
+            ])) // Show loading animation
           : Column(
-        children: [
-          // Existing rules list
-          Expanded(
-            child: ListView.builder(
-              itemCount: rules.length,
-              itemBuilder: (BuildContext context, int index) {
-                return AnalyzeTile(
-                    foodNames: rules[index][0],
-                    confidenceValue: rules[index][1],
-                    supportValue: rules[index][2],
-                    liftValue: rules[index][3]);
-              },
+              children: [
+                // Existing rules list
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: rulesList.length,
+                    itemBuilder: (BuildContext context, int index) {
+                      return AnalyzeTile(
+                          foodNames: rulesList[index].consequents.join(', ')+' ---> '+rulesList[index].antecedents.join(', '),
+                        confidenceValue: rulesList[index].confidence.toStringAsFixed(2),
+                        supportValue: rulesList[index].support.toStringAsFixed(2),
+                        liftValue: rulesList[index].lift.toStringAsFixed(2));
+                    },
+                  ),
+                ),
+                Container(
+                  color: Colors.green[400],
+                  child: ElevatedButton(
+                    onPressed: () => _showScrollableBottomSheet(context),
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: Size(double.infinity, 50),
+                      alignment: Alignment.center,
+                      backgroundColor: Colors.green[400],
+                    ),
+                    child: Text('Show Selected Products',
+                        style: TextStyle(color: Colors.white)),
+                  ),
+                ),
+              ],
             ),
-          ),
-          Container(
-            color: Colors.green[400],
-            child: ElevatedButton(
-              onPressed: () => _showScrollableBottomSheet(context),
-              style: ElevatedButton.styleFrom(
-                minimumSize: Size(double.infinity, 50),
-                alignment: Alignment.center,
-                backgroundColor: Colors.green[400],
-              ),
-              child: Text('Show Selected Products', style: TextStyle(color: Colors.white)),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
